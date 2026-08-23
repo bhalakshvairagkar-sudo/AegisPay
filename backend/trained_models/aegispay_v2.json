@@ -1,0 +1,13 @@
+{
+  "id": "aegispay_v2",
+  "name": "AegisPay Defense v2.0 (Post-Retraining)",
+  "type": "Adversarial Hybrid",
+  "precision": 1.0,
+  "recall": 0.9375,
+  "f1": 0.9677,
+  "rocAuc": 1.0,
+  "prAuc": 1.0,
+  "fpr": 0.0,
+  "fnr": 0.0625,
+  "latencyMs": 0.8
+}

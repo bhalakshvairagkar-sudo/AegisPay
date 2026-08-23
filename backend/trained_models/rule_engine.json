@@ -1,0 +1,13 @@
+{
+  "id": "rule_engine",
+  "name": "Rule-Based Engine (Legacy)",
+  "type": "Static Rules",
+  "precision": 1.0,
+  "recall": 0.0268,
+  "f1": 0.0522,
+  "rocAuc": 0.5756,
+  "prAuc": 0.3986,
+  "fpr": 0.0,
+  "fnr": 0.9732,
+  "latencyMs": 0.8
+}

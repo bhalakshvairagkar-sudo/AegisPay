@@ -1,0 +1,13 @@
+{
+  "id": "aegispay_v1",
+  "name": "AegisPay Defense v1.0",
+  "type": "Hybrid Ensemble",
+  "precision": 1.0,
+  "recall": 0.9018,
+  "f1": 0.9484,
+  "rocAuc": 0.9997,
+  "prAuc": 0.999,
+  "fpr": 0.0,
+  "fnr": 0.0982,
+  "latencyMs": 0.8
+}

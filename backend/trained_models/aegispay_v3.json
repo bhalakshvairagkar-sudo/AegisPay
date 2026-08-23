@@ -1,0 +1,13 @@
+{
+  "id": "aegispay_v3",
+  "name": "AegisPay Defense v3.0 (Robust Hardened)",
+  "type": "Robust Adversarial ML",
+  "precision": 1.0,
+  "recall": 0.9821,
+  "f1": 0.991,
+  "rocAuc": 1.0,
+  "prAuc": 1.0,
+  "fpr": 0.0,
+  "fnr": 0.0179,
+  "latencyMs": 0.8
+}

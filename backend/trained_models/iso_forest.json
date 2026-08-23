@@ -1,0 +1,13 @@
+{
+  "id": "iso_forest",
+  "name": "Isolation Forest (Unsupervised)",
+  "type": "Anomaly Detection",
+  "precision": 0.9412,
+  "recall": 1.0,
+  "f1": 0.9697,
+  "rocAuc": 0.9981,
+  "prAuc": 0.9942,
+  "fpr": 0.025,
+  "fnr": 0.0,
+  "latencyMs": 0.8
+}
