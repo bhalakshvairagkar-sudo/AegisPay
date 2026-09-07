@@ -78,13 +78,40 @@ def score_transaction(req: PredictTransactionRequest):
     explainer = system_state.get_explainability_engine()
     shap_factors = explainer.explain_transaction(X_df, model_score=raw_prob)
 
+    unified_risk = decision.unified_risk_score_100
+    action = decision.action
+    if unified_risk >= 80 or action == "BLOCK":
+        dec_color = "text-rose-400 bg-rose-950/50 border-rose-800"
+    elif unified_risk >= 60 or action == "MANUAL REVIEW":
+        dec_color = "text-amber-400 bg-amber-950/50 border-amber-800"
+    elif unified_risk >= 30 or "STEP-UP" in action:
+        dec_color = "text-cyan-400 bg-cyan-950/50 border-cyan-800"
+    else:
+        dec_color = "text-emerald-400 bg-emerald-950/50 border-emerald-800"
+
+    formatted_shap = []
+    for s in shap_factors:
+        formatted_shap.append({
+            "feature": s.get("feature", "Risk Factor"),
+            "feature_key": s.get("feature_key", "feature"),
+            "value": s.get("value", "+0.0%"),
+            "impact": s.get("impact", "SAFE_FACTOR"),
+            "raw_value": float(s.get("raw_value", 0.0)),
+            "impact_score": float(s.get("impact_score", 0.0))
+        })
+
     return {
         "transaction_features": clean_feat,
         "rail": rail,
         "calibrated_fraud_risk": decision.calibrated_fraud_risk,
         "unified_risk_score_100": decision.unified_risk_score_100,
         "unifiedRiskScore": decision.unified_risk_score_100,
+        "supervisedMlRisk": round(raw_prob * 100, 1),
+        "anomalyScore": round(float(model_scores.get("isolation_forest", 0.2)), 2),
+        "ruleRisk": 85.0 if decision.structural_guard_intercepted else (25.0 if clean_feat["velocity_1h"] > 3 else 10.0),
+        "behavioralVariance": float(clean_feat.get("behavioral_deviation", 0.15)),
         "decision": decision.action,
+        "decisionColor": dec_color,
         "policy_action": decision.action,
         "rail_directive": decision.rail_directive,
         "confidence_level": decision.confidence_level,
@@ -92,7 +119,8 @@ def score_transaction(req: PredictTransactionRequest):
         "reason_codes": decision.reason_codes,
         "primary_reason": decision.primary_reason_description,
         "structural_guard_intercepted": decision.structural_guard_intercepted,
-        "shap_attributions": shap_factors,
-        "shapDrivers": shap_factors,
-        "latency_ms": decision.latency_ms
+        "shap_attributions": formatted_shap,
+        "shapDrivers": formatted_shap,
+        "latency_ms": decision.latency_ms,
+        "is_live_prediction": True
     }
