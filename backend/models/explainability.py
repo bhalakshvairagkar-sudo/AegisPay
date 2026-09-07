@@ -33,12 +33,18 @@ class ExplainabilityEngine:
     def __init__(self, hybrid_model: AegisPayHybridDefense):
         self.hybrid_model = hybrid_model
 
-    def explain_transaction(self, features: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def explain_transaction(self, features: Any, model_score: Any = None) -> List[Dict[str, Any]]:
         """
         Computes marginal feature attributions for a single transaction input.
         Returns sorted list of drivers with percentage impact and classification.
         """
-        df = pd.DataFrame([features])
+        if isinstance(features, pd.DataFrame):
+            feat_dict = features.iloc[0].to_dict()
+        elif isinstance(features, dict):
+            feat_dict = features
+        else:
+            feat_dict = dict(features)
+
         xgb_importances = self.hybrid_model.xgb_model.get_feature_importances()
 
         # Baselines for normalization
@@ -58,7 +64,7 @@ class ExplainabilityEngine:
 
         drivers = []
 
-        for feat_key, feat_val in features.items():
+        for feat_key, feat_val in feat_dict.items():
             if feat_key not in baselines:
                 continue
 

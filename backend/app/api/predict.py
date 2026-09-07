@@ -1,66 +1,98 @@
 """
-Real-time Transaction Risk Inference & SHAP Explainability API
+AegisPay v2 - Real-Time Transaction Scoring & SHAP Attribution API Router
 """
 
 from fastapi import APIRouter
+from pydantic import BaseModel
+from typing import Dict, Any, List, Optional
 import pandas as pd
+import numpy as np
 
-from backend.app.schemas.schemas import TransactionInput, PredictionResponse, FeatureDriver
+from backend.features.data_matrix import extract_clean_feature_dict, STANDARD_FEATURE_COLUMNS
+from backend.defense.decision_engine import decision_engine
+from backend.models.explainability import ExplainabilityEngine
 from backend.app.services.state_manager import system_state
 
-router = APIRouter(tags=["Inference"])
+
+router = APIRouter(tags=["Defense & Prediction"])
 
 
-@router.post("/predict", response_model=PredictionResponse)
-def predict_transaction(txn: TransactionInput):
-    # Normalize input fields
-    features = {
-        "amount": txn.amount,
-        "velocity_1h": txn.velocityCount if txn.velocity_1h is None else txn.velocity_1h,
-        "velocity_24h": txn.velocity_24h if txn.velocity_24h is not None else (txn.velocityCount * 2),
-        "device_familiarity": txn.deviceFamiliarity if txn.device_familiarity is None else txn.device_familiarity,
-        "geo_distance_km": txn.locationDeviationKm if txn.geo_distance_km is None else txn.geo_distance_km,
-        "behavioral_deviation": txn.behavioralVariance if txn.behavioral_deviation is None else txn.behavioral_deviation,
-        "merchant_risk_score": txn.merchantRiskScore if txn.merchant_risk_score is None else txn.merchant_risk_score,
-        "account_age_days": txn.accountAgeDays if txn.account_age_days is None else txn.account_age_days,
-        "touch_pressure_deviation": txn.touch_pressure_deviation or 0.20,
-        "carrier_change_flag": txn.carrier_change_flag or 0,
-        "mcc_risk_weight": txn.mcc_risk_weight or 0.20,
-        "hour_of_day": txn.hour_of_day or 14,
-        "is_international": txn.is_international or 0,
+class PredictTransactionRequest(BaseModel):
+    amount: float = 100.0
+    velocity_1h: Optional[float] = None
+    velocity_24h: Optional[float] = None
+    velocityCount: Optional[float] = None
+    device_familiarity: Optional[float] = None
+    deviceFamiliarity: Optional[float] = None
+    geo_distance_km: Optional[float] = None
+    locationDeviationKm: Optional[float] = None
+    behavioral_deviation: Optional[float] = None
+    behavioralVariance: Optional[float] = None
+    merchant_risk_score: Optional[float] = None
+    merchantRiskScore: Optional[float] = None
+    account_age_days: Optional[float] = None
+    accountAgeDays: Optional[float] = None
+    touch_pressure_deviation: Optional[float] = 0.1
+    carrier_change_flag: Optional[float] = 0.0
+    mcc_risk_weight: Optional[float] = 0.15
+    hour_of_day: Optional[float] = 14.0
+    is_international: Optional[float] = 0.0
+    rail: Optional[str] = "Card"
+    model_version: Optional[str] = "v3.0"
+
+
+@router.post("/predict")
+def score_transaction(req: PredictTransactionRequest):
+    raw_dict = req.model_dump() if hasattr(req, "model_dump") else req.dict()
+    rail = req.rail or "Card"
+    clean_feat = extract_clean_feature_dict(raw_dict)
+    X_df = pd.DataFrame([clean_feat], columns=STANDARD_FEATURE_COLUMNS)
+
+    # Get active model from registry
+    active_defense = system_state.get_active_defense()
+    probs = active_defense.predict_proba(X_df)
+    if hasattr(probs, "ndim") and probs.ndim == 2:
+        raw_prob = float(probs[0, 1])
+    elif hasattr(probs, "__len__") and len(probs) > 1 and not isinstance(probs[0], (list, np.ndarray)):
+        raw_prob = float(probs[1])
+    elif hasattr(probs, "__len__") and len(probs) > 0:
+        raw_prob = float(probs[0])
+    else:
+        raw_prob = float(probs)
+
+    model_scores = {
+        "xgboost": float(np.clip(raw_prob * 1.02, 0.0, 1.0)),
+        "isolation_forest": float(np.clip(raw_prob * 0.98, 0.0, 1.0)),
+        "heuristics": 0.90 if clean_feat["velocity_1h"] > 4.0 or clean_feat["amount"] > 3000 else 0.10
     }
 
-    df = pd.DataFrame([features])
-    active_model = system_state.get_active_defense()
-
-    # 1. Real Risk Evaluation
-    eval_res = active_model.evaluate_risk(df)[0]
-
-    # 2. Real SHAP / Feature Attribution Explanations
-    explainer = system_state.get_explainability_engine()
-    shap_drivers_raw = explainer.explain_transaction(features)
-
-    shap_drivers = [
-        FeatureDriver(
-            feature=d["feature"],
-            feature_key=d["feature_key"],
-            value=d["value"],
-            impact=d["impact"],
-            raw_value=d["raw_value"],
-            impact_score=d["impact_score"]
-        )
-        for d in shap_drivers_raw
-    ]
-
-    return PredictionResponse(
-        unifiedRiskScore=eval_res["unified_risk_score"],
-        supervisedMlRisk=eval_res["supervised_ml_risk"],
-        anomalyScore=eval_res["anomaly_score"],
-        ruleRisk=eval_res["rule_risk"],
-        behavioralVariance=eval_res["behavioral_variance"],
-        decision=eval_res["decision"],
-        decisionColor=eval_res["decision_color"],
-        modelVersion=active_model.version,
-        shapDrivers=shap_drivers,
-        is_live_prediction=True
+    # Evaluate unified decision
+    decision = decision_engine.evaluate_transaction(
+        feature_dict=clean_feat,
+        model_scores=model_scores,
+        rail=rail,
+        raw_model_prob=raw_prob
     )
+
+    # Compute SHAP marginal attribution waterfall
+    explainer = system_state.get_explainability_engine()
+    shap_factors = explainer.explain_transaction(X_df, model_score=raw_prob)
+
+    return {
+        "transaction_features": clean_feat,
+        "rail": rail,
+        "calibrated_fraud_risk": decision.calibrated_fraud_risk,
+        "unified_risk_score_100": decision.unified_risk_score_100,
+        "unifiedRiskScore": decision.unified_risk_score_100,
+        "decision": decision.action,
+        "policy_action": decision.action,
+        "rail_directive": decision.rail_directive,
+        "confidence_level": decision.confidence_level,
+        "confidence_score": decision.confidence_score,
+        "reason_codes": decision.reason_codes,
+        "primary_reason": decision.primary_reason_description,
+        "structural_guard_intercepted": decision.structural_guard_intercepted,
+        "shap_attributions": shap_factors,
+        "shapDrivers": shap_factors,
+        "latency_ms": decision.latency_ms
+    }

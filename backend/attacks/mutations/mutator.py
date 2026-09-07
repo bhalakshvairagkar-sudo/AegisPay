@@ -1,25 +1,99 @@
 """
 Adversarial Mutation Engine
-Modulates transaction feature distributions across 5 distinct difficulty levels:
-- Level 1: Easy (Obvious statistical outliers, high velocity, unfamiliar device, gross geo jumps)
-- Level 2: Moderate (Moderate deviations, slight velocity bursts)
-- Level 3: Hard (Subtle amounts, near-boundary velocity, localized proxy)
-- Level 4: Adversarial (Multi-feature coordinated evasion, biometric smoothing, sub-threshold slicing)
-- Level 5: Unseen (Novel feature combinations designed for zero-shot holdout testing)
-
-NOTE: Difficulty influences the statistical feature perturbations ONLY.
-It does NOT determine or hardcode the Blue Team detection outcome.
+Modulates transaction feature distributions across 5 distinct difficulty levels.
 """
 
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 import numpy as np
 
+from backend.attacks.grammar import AttackComposition
+from backend.attacks.difficulty import DIFFICULTY_TIERS, DifficultyTier
 
-class AdversarialMutator:
-    """Applies controlled mathematical perturbations to base attack feature vectors."""
+
+class AttackMutator:
+    """Applies slot-directed and difficulty-governed perturbations to transaction features."""
 
     def __init__(self, seed: int = 42):
-        self.rng = np.random.default_rng(seed)
+        self.seed = seed
+        self.rng = np.random.RandomState(seed)
+
+    def mutate_transaction_features(
+        self,
+        base_features: Dict[str, Any],
+        composition: AttackComposition,
+        tier: Optional[DifficultyTier] = None
+    ) -> Dict[str, Any]:
+        level = composition.difficulty
+        tier = tier or DIFFICULTY_TIERS.get(level, DIFFICULTY_TIERS[1])
+
+        feat = dict(base_features)
+
+        # 1. Amount Perturbation
+        amt_scale = float(self.rng.uniform(tier.amount_perturbation_range[0], tier.amount_perturbation_range[1]))
+        if composition.evasion == "Micro Amount Below Alert Trigger":
+            feat["amount"] = round(float(self.rng.uniform(0.50, 4.99)), 2)
+        elif composition.monetization in ["Full Credit Line Drawdown", "High Value Corporate Wire"]:
+            feat["amount"] = round(float(feat.get("amount", 100.0) * amt_scale * 2.5), 2)
+        else:
+            feat["amount"] = round(float(feat.get("amount", 100.0) * amt_scale), 2)
+
+        # 2. Velocity Perturbation
+        base_v1 = float(feat.get("velocity_1h", 1.0))
+        base_v24 = float(feat.get("velocity_24h", 2.0))
+        if composition.temporal_pattern in ["Instantaneous Burst", "Millisecond Cadence", "Sub-Second Form Fill"]:
+            feat["velocity_1h"] = float(round(base_v1 * tier.velocity_multiplier * self.rng.uniform(2.0, 4.0), 1))
+            feat["velocity_24h"] = float(round(base_v24 * tier.velocity_multiplier * self.rng.uniform(2.5, 5.0), 1))
+        elif composition.temporal_pattern in ["Micro-Pacing", "Low Velocity Probe", "Distributed Inter-Request Intervals"]:
+            feat["velocity_1h"] = float(round(max(1.0, base_v1 * 0.8), 1))
+            feat["velocity_24h"] = float(round(max(1.0, base_v24 * 0.9), 1))
+        else:
+            feat["velocity_1h"] = float(round(base_v1 * tier.velocity_multiplier, 1))
+            feat["velocity_24h"] = float(round(base_v24 * tier.velocity_multiplier, 1))
+
+        # 3. Behavioral Deviation
+        b_dev = float(self.rng.uniform(tier.behavioral_deviation_min, tier.behavioral_deviation_max))
+        if composition.evasion in ["Synthetic Keystroke Cadence", "Bezier Curve Touch Emulation", "Humanized Thinking Pauses"]:
+            b_dev = float(np.clip(b_dev * 0.6, 0.05, 0.40))
+        feat["behavioral_deviation"] = round(b_dev, 4)
+
+        # 4. Device Familiarity
+        d_fam = float(self.rng.uniform(tier.device_familiarity_min, tier.device_familiarity_max))
+        if composition.trust in ["Legitimate User Device", "Legitimate Mobile App", "Established Terminal ID"]:
+            d_fam = float(np.clip(d_fam + 0.35, 0.60, 0.98))
+        elif composition.trust in ["Generated IMEI/Android ID", "Forged Browser Fingerprint"]:
+            d_fam = float(np.clip(d_fam * 0.4, 0.0, 0.35))
+        feat["device_familiarity"] = round(d_fam, 4)
+
+        # 5. Geographic Distance
+        if composition.trust in ["Residential Proxy", "Local Residential ISP IP", "Geofence Match"]:
+            feat["geo_distance_km"] = round(float(self.rng.uniform(1.0, 15.0)), 2)
+            feat["is_international"] = 0
+        elif composition.evasion == "Fake Proximity to Merchant POS":
+            feat["geo_distance_km"] = round(float(self.rng.uniform(0.1, 2.0)), 2)
+            feat["is_international"] = 0
+        else:
+            feat["geo_distance_km"] = round(float(self.rng.uniform(80.0, 1200.0)), 2)
+            feat["is_international"] = 1 if self.rng.rand() > 0.6 else 0
+
+        # 6. Merchant & Carrier Flags
+        if composition.family in ["Merchant & Collusive Abuse", "Social Engineering & APP"]:
+            feat["merchant_risk_score"] = round(float(self.rng.uniform(0.65, 0.95)), 4)
+            feat["mcc_risk_weight"] = round(float(self.rng.uniform(0.70, 0.98)), 4)
+        else:
+            feat["merchant_risk_score"] = round(float(self.rng.uniform(0.20, 0.60)), 4)
+            feat["mcc_risk_weight"] = round(float(self.rng.uniform(0.30, 0.70)), 4)
+
+        feat["carrier_change_flag"] = 1 if self.rng.rand() < tier.carrier_change_prob else 0
+
+        # 7. Account Vintage
+        if composition.family == "Identity & Synthetic Fraud" and composition.evasion == "Dormant Account Seasoning":
+            feat["account_age_days"] = int(self.rng.uniform(300, 800))
+        elif composition.family == "Account Takeover" and composition.behavior == "New Device First Login":
+            feat["account_age_days"] = int(self.rng.uniform(50, 400))
+        else:
+            feat["account_age_days"] = int(max(1, feat.get("account_age_days", 180) * (0.8 if level >= 3 else 0.2)))
+
+        return feat
 
     def apply_mutation(
         self,
@@ -27,59 +101,28 @@ class AdversarialMutator:
         difficulty_level: str,
         mutation_strength: float = 0.4
     ) -> Dict[str, Any]:
-        """
-        Perturbs base features based on difficulty and mutation strength.
-        Higher difficulty shifts features closer to legitimate cardholder baselines to test detector limits.
-        """
-        features = base_features.copy()
-        mut = float(np.clip(mutation_strength, 0.1, 0.9))
+        """Backward compatible helper."""
+        diff_int = 3
+        if "1" in difficulty_level or "Easy" in difficulty_level:
+            diff_int = 1
+        elif "2" in difficulty_level or "Mod" in difficulty_level:
+            diff_int = 2
+        elif "4" in difficulty_level or "Adv" in difficulty_level:
+            diff_int = 4
+        elif "5" in difficulty_level or "Unseen" in difficulty_level:
+            diff_int = 5
 
-        # Scale factor inversely proportional to difficulty (Higher difficulty = harder to separate from legit)
-        if difficulty_level == "Easy" or difficulty_level == "Level 1":
-            # Easy: Exaggerated fraud signals
-            features["velocity_1h"] = int(max(4, features.get("velocity_1h", 3) + self.rng.integers(3, 8)))
-            features["velocity_24h"] = int(features["velocity_1h"] + self.rng.integers(5, 15))
-            features["device_familiarity"] = float(np.clip(features.get("device_familiarity", 0.2) * 0.4, 0.0, 0.25))
-            features["geo_distance_km"] = float(max(600.0, features.get("geo_distance_km", 200.0) * (1.5 + mut)))
-            features["behavioral_deviation"] = float(np.clip(0.70 + self.rng.uniform(0.1, 0.25), 0.6, 0.99))
-            features["touch_pressure_deviation"] = float(np.clip(0.65 + self.rng.uniform(0.1, 0.25), 0.5, 0.95))
+        dummy_comp = AttackComposition(
+            access="Credential Stuffing",
+            trust="Residential Proxy",
+            rail="Card",
+            evasion="Temporal Pacing",
+            behavior="Synthetic Cadence",
+            monetization="P2P Transfer",
+            temporal_pattern="Micro-Pacing",
+            difficulty=diff_int
+        )
+        return self.mutate_transaction_features(base_features, dummy_comp)
 
-        elif difficulty_level == "Moderate" or difficulty_level == "Level 2":
-            # Moderate: Distinct but realistic anomalies
-            features["velocity_1h"] = int(max(2, features.get("velocity_1h", 2) + self.rng.integers(1, 4)))
-            features["velocity_24h"] = int(features["velocity_1h"] + self.rng.integers(3, 8))
-            features["device_familiarity"] = float(np.clip(features.get("device_familiarity", 0.35) + self.rng.normal(0, 0.08), 0.15, 0.55))
-            features["geo_distance_km"] = float(np.clip(features.get("geo_distance_km", 150.0) + self.rng.normal(50, 40), 50.0, 800.0))
-            features["behavioral_deviation"] = float(np.clip(0.45 + self.rng.uniform(0.05, 0.20), 0.35, 0.75))
-            features["touch_pressure_deviation"] = float(np.clip(0.40 + self.rng.uniform(0.05, 0.18), 0.30, 0.70))
 
-        elif difficulty_level == "Hard" or difficulty_level == "Level 3":
-            # Hard: Low-profile perturbations near decision boundaries
-            features["velocity_1h"] = int(max(1, min(4, features.get("velocity_1h", 2) + self.rng.integers(0, 2))))
-            features["velocity_24h"] = int(features["velocity_1h"] + self.rng.integers(1, 4))
-            features["device_familiarity"] = float(np.clip(0.55 + self.rng.normal(0, 0.1), 0.35, 0.78))
-            features["geo_distance_km"] = float(np.clip(self.rng.normal(85.0, 30.0), 15.0, 220.0))
-            features["behavioral_deviation"] = float(np.clip(0.28 + self.rng.normal(0, 0.05) * (1.0 - mut * 0.3), 0.18, 0.48))
-            features["touch_pressure_deviation"] = float(np.clip(0.25 + self.rng.normal(0, 0.05), 0.15, 0.45))
-
-        elif difficulty_level == "Adversarial" or difficulty_level == "Level 4":
-            # Adversarial: Coordinated mimicked features designed to probe detector weak spots
-            # Subtle amount adjustments, mimicked biometric touch, residential proxy geo match
-            features["velocity_1h"] = int(max(1, min(3, self.rng.poisson(lam=1.2))))
-            features["velocity_24h"] = int(features["velocity_1h"] + self.rng.poisson(lam=2.0))
-            features["device_familiarity"] = float(np.clip(0.68 + self.rng.normal(0, 0.08), 0.50, 0.88))
-            features["geo_distance_km"] = float(np.clip(abs(self.rng.normal(25.0, 18.0)), 2.0, 95.0))
-            # Biometric mimicry dampens obvious deviations
-            features["behavioral_deviation"] = float(np.clip(0.19 + self.rng.normal(0, 0.04), 0.11, 0.32))
-            features["touch_pressure_deviation"] = float(np.clip(0.16 + self.rng.normal(0, 0.03), 0.08, 0.28))
-
-        elif difficulty_level == "Unseen" or difficulty_level == "Level 5":
-            # Unseen Holdout: Cross-feature non-linear correlations
-            features["velocity_1h"] = int(self.rng.choice([1, 2, 3]))
-            features["velocity_24h"] = int(features["velocity_1h"] + self.rng.choice([2, 4, 6]))
-            features["device_familiarity"] = float(np.clip(0.62 + self.rng.normal(0, 0.12), 0.40, 0.85))
-            features["geo_distance_km"] = float(np.clip(abs(self.rng.normal(45.0, 35.0)), 5.0, 250.0))
-            features["behavioral_deviation"] = float(np.clip(0.22 + self.rng.normal(0, 0.05), 0.12, 0.38))
-            features["touch_pressure_deviation"] = float(np.clip(0.18 + self.rng.normal(0, 0.04), 0.09, 0.34))
-
-        return features
+AdversarialMutator = AttackMutator
