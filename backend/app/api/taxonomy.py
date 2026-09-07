@@ -62,12 +62,30 @@ def get_attack_taxonomy():
     ]
     families = sorted(list(set(p["family"] for p in prims)))
 
+    attacks = [
+        {
+            "id": p.primitive_id,
+            "family": p.family,
+            "name": p.name,
+            "genAi": True if "AI" in p.family or "Biometric" in p.name or "GAN" in p.description else False,
+            "sophistication": 7.5,
+            "severity": "CRITICAL" if p.family in ["Account Takeover", "AI Adaptive Fraud"] else "HIGH",
+            "detectability": "LOW" if p.family in ["Behavioral Impersonation", "AI Adaptive Fraud"] else "MEDIUM",
+            "evasionStrategy": p.description,
+            "signals": p.observable_signals,
+            "description": p.description,
+            "mitigationPolicy": p.mitigation_policy
+        }
+        for p in ATTACK_PRIMITIVES.values()
+    ]
+
     return {
         "total_vectors": len(prims),
         "primitives_count": len(prims),
         "families_count": len(families),
         "families": families,
         "primitives": prims,
+        "attacks": attacks,
         "grammar_vocabularies": {
             "access_mechanisms": ACCESS_MECHANISMS,
             "trust_mechanisms": TRUST_MECHANISMS,

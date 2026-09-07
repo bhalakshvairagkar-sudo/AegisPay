@@ -74,21 +74,33 @@ def run_evasion_gap_analysis():
         )
         explained_failures.append(exp)
 
+    clusters_formatted = []
+    for c in clusters:
+        weak_feat = c.top_vulnerable_features[0] if c.top_vulnerable_features else "behavioral_deviation"
+        weak_label = weak_feat.replace("_", " ").title()
+        clusters_formatted.append({
+            "cluster_id": f"CLUST-{c.cluster_id + 1}",
+            "impact_badge": "CRITICAL BLIND-SPOT" if c.blind_spot_score > 0.7 else "HIGH RISK",
+            "title": f"Cluster {c.cluster_id + 1}: {weak_label} Blind-Spot",
+            "dominant_family": c.dominant_attack_family,
+            "evasion_count": c.size,
+            "percentage_of_evasions": round((c.size / max(1, len(fn_df))) * 100, 1),
+            "weak_feature": weak_feat,
+            "weak_feature_label": weak_label,
+            "description": f"Missed evasions concentrated around {weak_label} anomalies on {c.dominant_rail} rail.",
+            "centroid_features": c.centroid_features,
+            "blind_spot_score": c.blind_spot_score,
+            "evasion_rate_pct": round(c.evasion_rate * 100, 1)
+        })
+
     return {
+        "total_tested": 150,
+        "evasion_count": len(fn_df),
+        "evasion_rate": round((len(fn_df) / 150) * 100, 1),
+        "clusters": clusters_formatted,
+        "recommendation": f"Gap Analysis isolated {len(fn_df)} evasions across {len(clusters)} clusters. Recommend generating 300 targeted adversarial counter-samples.",
         "total_false_negatives_analyzed": len(fn_df),
         "cluster_stability_evaluation": stability_meta,
-        "discovered_evasion_clusters": [
-            {
-                "cluster_id": c.cluster_id,
-                "cluster_size": c.size,
-                "dominant_family": c.dominant_attack_family,
-                "dominant_rail": c.dominant_rail,
-                "blind_spot_score": c.blind_spot_score,
-                "evasion_rate_pct": round(c.evasion_rate * 100, 1),
-                "top_vulnerable_features": c.top_vulnerable_features,
-                "centroid_features": c.centroid_features
-            }
-            for c in clusters
-        ],
+        "discovered_evasion_clusters": clusters_formatted,
         "why_did_model_fail_samples": explained_failures
     }
