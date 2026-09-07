@@ -1,0 +1,10 @@
+{
+  "name": "aegispay",
+  "version": "2026.1.0",
+  "description": "AegisPay AI Defense Lab for Payment Security",
+  "private": true,
+  "scripts": {
+    "start": "python -m uvicorn backend.app.main:app --host 0.0.0.0 --port ",
+    "build": "pip install -r requirements.txt"
+  }
+}
